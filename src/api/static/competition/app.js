@@ -161,10 +161,14 @@ function shortenAddress(addr) {
 async function fetchPositionHistory(user, coin, fromMs, toMs) {
     const params = new URLSearchParams({
         user,
-        coin,
         fromMs: fromMs.toString(),
         toMs: toMs.toString()
     });
+    
+    // Only add coin if it's provided
+    if (coin) {
+        params.set('coin', coin);
+    }
     
     const response = await fetch(`/v1/positions/history?${params}`);
     if (!response.ok) {
@@ -215,7 +219,7 @@ function buildLegend(containerId, data) {
 // Build timeline with equal interval snapshots
 function buildUnifiedTimeline(data, startMs, endMs) {
     // Create snapshots at equal intervals (e.g., every 1% of time range)
-    const numSnapshots = 75; // Number of snapshots for smooth animation
+    const numSnapshots = 50; // Number of snapshots for smooth animation
     const timeRange = endMs - startMs;
     const interval = timeRange / (numSnapshots - 1);
     
@@ -343,10 +347,7 @@ async function startVisualization() {
         showError('endTime', 'End time is required');
         hasError = true;
     }
-    if (!token) {
-        showError('token', 'Token symbol is required');
-        hasError = true;
-    }
+    // Token is now optional - if empty, all coins will be included
     if (!addressesText) {
         showError('addresses', 'At least one address is required');
         hasError = true;
@@ -553,10 +554,14 @@ async function fetchLeaderboard() {
         
         const params = new URLSearchParams({
             users: addresses,
-            coin: token,
             fromMs: startMs.toString(),
             toMs: endMs.toString()
         });
+        
+        // Only add coin if it's provided
+        if (token) {
+            params.set('coin', token);
+        }
         
         const response = await fetch(`/v1/leaderboard/combined?${params}`);
         if (!response.ok) {

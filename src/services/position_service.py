@@ -22,7 +22,7 @@ class PositionService:
     async def get_position_history(
         self,
         user: str,
-        coin: str,
+        coin: Optional[str] = None,
         from_ms: Optional[int] = None,
         to_ms: Optional[int] = None,
         builder_only: bool = False,
@@ -31,10 +31,11 @@ class PositionService:
         Get position history timeline for a user and coin.
         
         Reconstructs position states from fills using average cost method.
+        If coin is not specified, combines realized PnL across all coins.
         
         Args:
             user: User address
-            coin: Coin to get position history for
+            coin: Coin to get position history for (if None, all coins are included)
             from_ms: Start time in milliseconds
             to_ms: End time in milliseconds
             builder_only: If True, only include builder-attributed trades
@@ -54,10 +55,12 @@ class PositionService:
     def _reconstruct_position_history(
         self, 
         fills: list[Fill], 
-        coin: str
+        coin: Optional[str]
     ) -> list[PositionState]:
         """
         Reconstruct position history from fills using average cost method.
+        
+        If coin is None, tracks positions across all coins and combines realized PnL.
         
         The average cost method:
         - When increasing position: new_avg = (old_size * old_avg + new_size * new_px) / total_size
@@ -69,6 +72,11 @@ class PositionService:
 
         history: list[PositionState] = []
         
+        if coin is None:
+            # Multi-coin mode: track positions per coin and combine PnL
+            return self._reconstruct_multi_coin_history(fills)
+        
+        # Single coin mode: original logic
         # State tracking
         net_size = 0.0
         avg_entry_px = 0.0
@@ -116,6 +124,76 @@ class PositionService:
                 tainted=None,  # TODO: Set based on builder-only mode
             ))
 
+        return history
+
+    def _reconstruct_multi_coin_history(self, fills: list[Fill]) -> list[PositionState]:
+        """
+        Reconstruct position history across all coins, combining realized PnL.
+        
+        When tracking multiple coins:
+        - Realized PnL is summed across all coins
+        - Net size is set to 0 (since we can't meaningfully combine sizes across different coins)
+        - Each fill creates a new state with updated cumulative PnL
+        """
+        if not fills:
+            return []
+        
+        # Track positions per coin
+        coin_positions: dict[str, dict] = {}
+        history: list[PositionState] = []
+        cumulative_pnl = 0.0
+        
+        for fill in fills:
+            coin_name = fill.coin
+            cumulative_pnl += fill.realized_pnl
+            
+            # Initialize coin tracking if needed
+            if coin_name not in coin_positions:
+                coin_positions[coin_name] = {
+                    'net_size': 0.0,
+                    'avg_entry_px': 0.0
+                }
+            
+            coin_state = coin_positions[coin_name]
+            net_size = coin_state['net_size']
+            avg_entry_px = coin_state['avg_entry_px']
+            signed_size = fill.signed_size
+            
+            # Update position for this coin using same logic as single-coin
+            if abs(net_size) < 1e-10:
+                net_size = signed_size
+                avg_entry_px = fill.price
+            elif (net_size > 0 and signed_size > 0) or (net_size < 0 and signed_size < 0):
+                total_size = net_size + signed_size
+                avg_entry_px = (
+                    (abs(net_size) * avg_entry_px + abs(signed_size) * fill.price) 
+                    / abs(total_size)
+                )
+                net_size = total_size
+            else:
+                new_size = net_size + signed_size
+                if abs(new_size) < 1e-10:
+                    net_size = 0.0
+                    avg_entry_px = 0.0
+                elif (net_size > 0 and new_size < 0) or (net_size < 0 and new_size > 0):
+                    net_size = new_size
+                    avg_entry_px = fill.price
+                else:
+                    net_size = new_size
+            
+            coin_state['net_size'] = net_size
+            coin_state['avg_entry_px'] = avg_entry_px
+            
+            # Create position state with combined PnL and netSize=0
+            history.append(PositionState(
+                timeMs=fill.time,
+                coin="ALL",  # Indicate this is combined across all coins
+                netSize=0.0,  # Can't meaningfully combine sizes across coins
+                avgEntryPx=0.0,
+                realizedPnl=cumulative_pnl,
+                tainted=None,
+            ))
+        
         return history
 
     async def get_current_positions(self, user: str) -> CurrentPositionResponse:

@@ -78,9 +78,9 @@ async def get_position_history(
         description="User address",
         example="0x0e09b56ef137f417e424f1265425e93bfff77e17"
     ),
-    coin: str = Query(
-        ..., 
-        description="Coin to get position history for",
+    coin: Optional[str] = Query(
+        None, 
+        description="Coin to get position history for (if not provided, all coins are included)",
         example="SOL"
     ),
     fromMs: Optional[int] = Query(
