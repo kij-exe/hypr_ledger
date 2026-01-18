@@ -188,6 +188,14 @@ input, select, textarea {
     font-family: inherit;
 }
 
+input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    cursor: pointer;
+    accent-color: var(--accent-cyan);
+}
+
 input:focus, select:focus, textarea:focus {
     outline: none;
     border-color: var(--accent-cyan);

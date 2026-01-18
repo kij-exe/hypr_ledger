@@ -26,6 +26,7 @@ class PositionService:
         from_ms: Optional[int] = None,
         to_ms: Optional[int] = None,
         builder_only: bool = False,
+        builder_service: Optional["BuilderService"] = None,
     ) -> list[PositionState]:
         """
         Get position history timeline for a user and coin.
@@ -38,7 +39,8 @@ class PositionService:
             coin: Coin to get position history for (if None, all coins are included)
             from_ms: Start time in milliseconds
             to_ms: End time in milliseconds
-            builder_only: If True, only include builder-attributed trades
+            builder_only: If True, mark tainted positions and they can be filtered
+            builder_service: Builder service for matching builder fills (required if builder_only=True)
             
         Returns:
             List of PositionState objects representing timeline
@@ -50,17 +52,30 @@ class PositionService:
             coin=coin,
         )
         
-        return self._reconstruct_position_history(fills, coin)
+        # Get builder fills if builder_only mode is enabled
+        builder_fill_indices = set()
+        if builder_only and builder_service and from_ms and to_ms:
+            from src.services.builder_service import BuilderService
+            builder_fills = await builder_service.get_builder_fills_for_range(
+                user=user,
+                start_ms=from_ms,
+                end_ms=to_ms
+            )
+            builder_fill_indices = builder_service.match_fills(fills, builder_fills)
+        
+        return self._reconstruct_position_history(fills, coin, builder_fill_indices if builder_only else None)
 
     def _reconstruct_position_history(
         self, 
         fills: list[Fill], 
-        coin: Optional[str]
+        coin: Optional[str],
+        builder_fill_indices: Optional[set[int]] = None
     ) -> list[PositionState]:
         """
         Reconstruct position history from fills using average cost method.
         
         If coin is None, tracks positions across all coins and combines realized PnL.
+        If builder_fill_indices is provided, marks positions as tainted based on lifecycle analysis.
         
         The average cost method:
         - When increasing position: new_avg = (old_size * old_avg + new_size * new_px) / total_size
@@ -74,24 +89,33 @@ class PositionService:
         
         if coin is None:
             # Multi-coin mode: track positions per coin and combine PnL
-            return self._reconstruct_multi_coin_history(fills)
+            return self._reconstruct_multi_coin_history(fills, builder_fill_indices)
         
         # Single coin mode: original logic
         # State tracking
         net_size = 0.0
         avg_entry_px = 0.0
         cumulative_pnl = 0.0
+        
+        # Track lifecycles for taint detection
+        lifecycle_start_idx: Optional[int] = None
+        lifecycle_fills: list[int] = []  # Indices of fills in current lifecycle
 
-        for fill in fills:
+        for fill_idx, fill in enumerate(fills):
             signed_size = fill.signed_size
             cumulative_pnl += fill.realized_pnl
             
-            if abs(net_size) < 1e-10:
-                # Starting fresh position
+            was_flat = abs(net_size) < 1e-10
+            
+            if was_flat:
+                # Starting fresh position - start new lifecycle
+                lifecycle_start_idx = fill_idx
+                lifecycle_fills = [fill_idx]
                 net_size = signed_size
                 avg_entry_px = fill.price
             elif (net_size > 0 and signed_size > 0) or (net_size < 0 and signed_size < 0):
                 # Increasing position - update average
+                lifecycle_fills.append(fill_idx)
                 total_size = net_size + signed_size
                 avg_entry_px = (
                     (abs(net_size) * avg_entry_px + abs(signed_size) * fill.price) 
@@ -100,10 +124,11 @@ class PositionService:
                 net_size = total_size
             else:
                 # Decreasing or flipping position
+                lifecycle_fills.append(fill_idx)
                 new_size = net_size + signed_size
                 
                 if abs(new_size) < 1e-10:
-                    # Position closed
+                    # Position closed - end lifecycle
                     net_size = 0.0
                     avg_entry_px = 0.0
                 elif (new_size > 0) != (net_size > 0):
@@ -114,6 +139,12 @@ class PositionService:
                     # Partial close - avg stays same
                     net_size = new_size
 
+            # Determine taint status for this position state
+            tainted = None
+            if builder_fill_indices is not None and lifecycle_start_idx is not None:
+                # Check if any fill in current lifecycle is not builder-attributed
+                tainted = any(idx not in builder_fill_indices for idx in lifecycle_fills)
+
             # Record state after this fill
             history.append(PositionState(
                 timeMs=fill.time,
@@ -121,12 +152,16 @@ class PositionService:
                 netSize=net_size,
                 avgEntryPx=avg_entry_px,
                 realizedPnl=cumulative_pnl,
-                tainted=None,  # TODO: Set based on builder-only mode
+                tainted=tainted,
             ))
 
         return history
 
-    def _reconstruct_multi_coin_history(self, fills: list[Fill]) -> list[PositionState]:
+    def _reconstruct_multi_coin_history(
+        self, 
+        fills: list[Fill],
+        builder_fill_indices: Optional[set[int]] = None
+    ) -> list[PositionState]:
         """
         Reconstruct position history across all coins, combining realized PnL.
         
@@ -134,16 +169,19 @@ class PositionService:
         - Realized PnL is summed across all coins
         - Net size is set to 0 (since we can't meaningfully combine sizes across different coins)
         - Each fill creates a new state with updated cumulative PnL
+        - Taint detection tracks lifecycles per coin
         """
         if not fills:
             return []
         
         # Track positions per coin
         coin_positions: dict[str, dict] = {}
+        # Track lifecycles per coin for taint detection
+        coin_lifecycles: dict[str, list[int]] = {}
         history: list[PositionState] = []
         cumulative_pnl = 0.0
         
-        for fill in fills:
+        for fill_idx, fill in enumerate(fills):
             coin_name = fill.coin
             cumulative_pnl += fill.realized_pnl
             
@@ -159,11 +197,19 @@ class PositionService:
             avg_entry_px = coin_state['avg_entry_px']
             signed_size = fill.signed_size
             
+            was_flat = abs(net_size) < 1e-10
+            
             # Update position for this coin using same logic as single-coin
-            if abs(net_size) < 1e-10:
+            if was_flat:
+                # Start new lifecycle for this coin
+                if coin_name not in coin_lifecycles:
+                    coin_lifecycles[coin_name] = []
+                coin_lifecycles[coin_name] = [fill_idx]
                 net_size = signed_size
                 avg_entry_px = fill.price
             elif (net_size > 0 and signed_size > 0) or (net_size < 0 and signed_size < 0):
+                # Add to current lifecycle
+                coin_lifecycles[coin_name].append(fill_idx)
                 total_size = net_size + signed_size
                 avg_entry_px = (
                     (abs(net_size) * avg_entry_px + abs(signed_size) * fill.price) 
@@ -171,6 +217,9 @@ class PositionService:
                 )
                 net_size = total_size
             else:
+                # Add to current lifecycle
+                if coin_name in coin_lifecycles:
+                    coin_lifecycles[coin_name].append(fill_idx)
                 new_size = net_size + signed_size
                 if abs(new_size) < 1e-10:
                     net_size = 0.0
@@ -184,6 +233,17 @@ class PositionService:
             coin_state['net_size'] = net_size
             coin_state['avg_entry_px'] = avg_entry_px
             
+            # Compute taint status
+            # A multi-coin position is tainted if ANY coin's active lifecycle contains a non-builder fill
+            tainted = None
+            if builder_fill_indices is not None:
+                tainted = False
+                for coin_lifecycle in coin_lifecycles.values():
+                    if coin_lifecycle:  # Only check active lifecycles
+                        if any(idx not in builder_fill_indices for idx in coin_lifecycle):
+                            tainted = True
+                            break
+            
             # Create position state with combined PnL and netSize=0
             history.append(PositionState(
                 timeMs=fill.time,
@@ -191,7 +251,7 @@ class PositionService:
                 netSize=0.0,  # Can't meaningfully combine sizes across coins
                 avgEntryPx=0.0,
                 realizedPnl=cumulative_pnl,
-                tainted=None,
+                tainted=tainted,
             ))
         
         return history

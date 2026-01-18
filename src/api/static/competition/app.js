@@ -158,11 +158,12 @@ function shortenAddress(addr) {
 }
 
 // Fetch position history for a user
-async function fetchPositionHistory(user, coin, fromMs, toMs) {
+async function fetchPositionHistory(user, coin, fromMs, toMs, builderOnly = false) {
     const params = new URLSearchParams({
         user,
         fromMs: fromMs.toString(),
-        toMs: toMs.toString()
+        toMs: toMs.toString(),
+        builderOnly: builderOnly.toString()
     });
     
     // Only add coin if it's provided
@@ -335,6 +336,7 @@ async function startVisualization() {
     const token = document.getElementById('token').value.trim().toUpperCase();
     const duration = parseFloat(document.getElementById('duration').value) * 1000;
     const addressesText = document.getElementById('addresses').value.trim();
+    const builderOnly = document.getElementById('builderOnly').checked;
 
     // Validation
     let hasError = false;
@@ -376,7 +378,16 @@ async function startVisualization() {
             const addr = addresses[i];
             setStatus(`Fetching ${shortenAddress(addr)}...`, 'running');
             
-            const positions = await fetchPositionHistory(addr, token, startMs, endMs);
+            let positions = await fetchPositionHistory(addr, token, startMs, endMs, builderOnly);
+            
+            // Filter out tainted positions if builder-only mode is enabled
+            if (builderOnly) {
+                const beforeCount = positions.length;
+                positions = positions.filter(p => p.tainted === false);
+                const afterCount = positions.length;
+                console.log(`${shortenAddress(addr)}: Filtered ${beforeCount - afterCount} tainted positions (${afterCount} remain)`);
+            }
+            
             data[addr] = {
                 positions: positions,
                 color: COLORS[i % COLORS.length]
@@ -398,7 +409,8 @@ async function startVisualization() {
             data: data,
             timeline: timeline,
             scales: scales,
-            currentTimelineIndex: 0
+            currentTimelineIndex: 0,
+            builderOnly: builderOnly
         };
 
         buildLegend('positionLegend', data);
@@ -551,11 +563,13 @@ async function fetchLeaderboard() {
         const token = document.getElementById('token').value.trim().toUpperCase();
         const startMs = animationState.startTime;
         const endMs = animationState.endTime;
+        const builderOnly = animationState.builderOnly || false;
         
         const params = new URLSearchParams({
             users: addresses,
             fromMs: startMs.toString(),
-            toMs: endMs.toString()
+            toMs: endMs.toString(),
+            builderOnly: builderOnly.toString()
         });
         
         // Only add coin if it's provided
@@ -568,7 +582,17 @@ async function fetchLeaderboard() {
             throw new Error('Failed to fetch leaderboard data');
         }
         
-        leaderboardData = await response.json();
+        let data = await response.json();
+        
+        // Filter out tainted entries if builder-only mode is enabled
+        if (builderOnly) {
+            const beforeCount = data.length;
+            data = data.filter(entry => entry.tainted === false);
+            const afterCount = data.length;
+            console.log(`Leaderboard: Filtered ${beforeCount - afterCount} tainted entries (${afterCount} remain)`);
+        }
+        
+        leaderboardData = data;
         displayLeaderboard(currentSortMetric);
         document.getElementById('leaderboardContainer').style.display = 'block';
         setStatus('Complete', 'idle');

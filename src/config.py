@@ -15,8 +15,9 @@ class Config:
     # Hyperliquid API
     hyperliquid_api_url: str = "https://api.hyperliquid.xyz"
     
-    # Builder-only mode (placeholder for future implementation)
-    target_builder: str | None = None
+    # Builder-only mode configuration
+    # Default builder address (can be overridden via TARGET_BUILDER env var)
+    target_builder: str = "0x2868fc0d9786a740b491577a43502259efa78a39"
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -28,5 +29,8 @@ class Config:
                 "HYPERLIQUID_API_URL", 
                 "https://api.hyperliquid.xyz"
             ),
-            target_builder=os.getenv("TARGET_BUILDER"),
+            target_builder=os.getenv(
+                "TARGET_BUILDER",
+                "0x2868fc0d9786a740b491577a43502259efa78a39"
+            ),
         )

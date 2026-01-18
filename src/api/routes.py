@@ -95,22 +95,36 @@ async def get_position_history(
     ),
     builderOnly: bool = Query(
         False, 
-        description="Filter to builder-attributed trades only"
+        description="Enable builder-only mode (marks tainted positions)"
     ),
     datasource: DataSource = Depends(get_datasource),
 ) -> list[PositionState]:
     """
     Get position history timeline for a user and coin.
     
-    Returns: timeMs, netSize, avgEntryPx, tainted
+    When builderOnly=true, positions are marked as tainted if they contain
+    non-builder fills within the same lifecycle. Tainted positions should be
+    excluded from builder-only aggregations.
+    
+    Returns: timeMs, netSize, avgEntryPx, realizedPnl, tainted
     """
+    from src.config import Config
+    from src.services.builder_service import BuilderService
+    
     service = PositionService(datasource)
+    builder_service = None
+    
+    if builderOnly:
+        config = Config.from_env()
+        builder_service = BuilderService(config.target_builder)
+    
     return await service.get_position_history(
         user=user,
         coin=coin,
         from_ms=fromMs,
         to_ms=toMs,
         builder_only=builderOnly,
+        builder_service=builder_service,
     )
 
 
