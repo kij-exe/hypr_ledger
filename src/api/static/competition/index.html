@@ -19,26 +19,32 @@
             <div class="controls-row">
                 <div class="control-group">
                     <label>Start Time</label>
-                    <input type="datetime-local" id="startTime" step="1">
+                    <input type="datetime-local" id="startTime" step="1" onfocus="clearError('startTime')">
+                    <span class="error-message" id="startTime-error"></span>
                 </div>
                 <div class="control-group">
                     <label>End Time</label>
-                    <input type="datetime-local" id="endTime" step="1">
+                    <input type="datetime-local" id="endTime" step="1" onfocus="clearError('endTime')">
+                    <span class="error-message" id="endTime-error"></span>
                 </div>
                 <div class="control-group">
                     <label>Token</label>
-                    <input type="text" id="token" placeholder="e.g. BTC, ETH, SOL">
+                    <input type="text" id="token" placeholder="e.g. BTC, ETH, SOL" onfocus="clearError('token')">
+                    <span class="error-message" id="token-error"></span>
                 </div>
                 <div class="control-group">
                     <label>Duration (seconds)</label>
-                    <input type="number" id="duration" value="10" min="1" max="60">
+                    <input type="number" id="duration" value="10" min="1" max="60" onfocus="clearError('duration')">
+                    <span class="error-message" id="duration-error"></span>
                 </div>
             </div>
             <div class="control-group">
                 <label>User Addresses (one per line)</label>
-                <textarea id="addresses">0x0e09b56ef137f417e424f1265425e93bfff77e17
+                <textarea id="addresses" onfocus="clearError('addresses')">0x0e09b56ef137f417e424f1265425e93bfff77e17
 0x186b7610ff3f2e3fd7985b95f525ee0e37a79a74</textarea>
+                <span class="error-message" id="addresses-error"></span>
             </div>
+            <div class="button-spacer"></div>
             <div class="button-row">
                 <button id="startBtn" class="primary" onclick="startVisualization()">Start</button>
                 <button id="stopBtn" class="secondary" onclick="stopVisualization()" disabled>Stop</button>
@@ -83,6 +89,32 @@
                     <canvas id="pnlChart"></canvas>
                 </div>
                 <div class="legend-custom" id="pnlLegend"></div>
+            </div>
+        </div>
+
+        <div class="leaderboard-container glass-card" id="leaderboardContainer" style="display: none;">
+            <h2>Competition Results</h2>
+            <div class="leaderboard-controls">
+                <span class="sort-label">Sort by:</span>
+                <button class="sort-btn active" data-sort="pnl" onclick="sortLeaderboard('pnl')">PnL</button>
+                <button class="sort-btn" data-sort="volume" onclick="sortLeaderboard('volume')">Volume</button>
+                <button class="sort-btn" data-sort="returnPct" onclick="sortLeaderboard('returnPct')">Return %</button>
+            </div>
+            <div class="leaderboard-table-wrapper">
+                <table class="leaderboard-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Address</th>
+                            <th class="text-right">PnL</th>
+                            <th class="text-right">Volume</th>
+                            <th class="text-right">Return %</th>
+                            <th class="text-right">Trades</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaderboardBody">
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>

@@ -149,6 +149,24 @@ h1 {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    position: relative;
+}
+
+.error-message {
+    font-size: 11px;
+    color: #ff5555;
+    margin-top: 4px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    min-height: 16px;
+}
+
+.error-message:not(:empty) {
+    opacity: 1;
+}
+
+.button-spacer {
+    height: 20px;
 }
 
 label {
@@ -400,6 +418,116 @@ button:disabled {
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.2);
+}
+
+/* Leaderboard */
+.leaderboard-container {
+    margin-top: 32px;
+    padding: 24px;
+}
+
+.leaderboard-container h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.leaderboard-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.sort-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.sort-btn {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.sort-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
+}
+
+.sort-btn.active {
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    border-color: transparent;
+    color: white;
+    box-shadow: var(--glow-cyan);
+}
+
+.leaderboard-table-wrapper {
+    overflow-x: auto;
+}
+
+.leaderboard-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.leaderboard-table thead th {
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.leaderboard-table tbody tr {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all 0.2s ease;
+}
+
+.leaderboard-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.leaderboard-table tbody td {
+    padding: 14px 16px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.leaderboard-table .text-right {
+    text-align: right;
+}
+
+.leaderboard-table .rank-cell {
+    font-weight: 600;
+    color: var(--accent-cyan);
+}
+
+.leaderboard-table .address-cell {
+    font-family: 'SF Mono', 'Monaco', 'Menlo', monospace;
+    font-size: 12px;
+}
+
+.leaderboard-table .positive {
+    color: var(--accent-green);
+}
+
+.leaderboard-table .negative {
+    color: var(--accent-red);
 }
 
 /* Input color scheme for datetime */

@@ -212,28 +212,21 @@ function buildLegend(containerId, data) {
     });
 }
 
-// Merge all position events into a unified timeline
+// Build timeline with equal interval snapshots
 function buildUnifiedTimeline(data, startMs, endMs) {
-    const allTimestamps = new Set();
-    allTimestamps.add(startMs);
+    // Create snapshots at equal intervals (e.g., every 1% of time range)
+    const numSnapshots = 75; // Number of snapshots for smooth animation
+    const timeRange = endMs - startMs;
+    const interval = timeRange / (numSnapshots - 1);
     
-    Object.values(data).forEach(info => {
-        info.positions.forEach(pos => {
-            if (pos.timeMs >= startMs && pos.timeMs <= endMs) {
-                allTimestamps.add(pos.timeMs);
-            }
-        });
-    });
-    
-    allTimestamps.add(endMs);
-    
-    const sortedTimestamps = Array.from(allTimestamps).sort((a, b) => a - b);
     const timeline = [];
     
-    sortedTimestamps.forEach(ts => {
+    for (let i = 0; i < numSnapshots; i++) {
+        const ts = startMs + (interval * i);
         const event = { timeMs: ts, values: {} };
         
         Object.entries(data).forEach(([address, info]) => {
+            // Find the most recent position at or before this timestamp
             let lastPos = null;
             for (const pos of info.positions) {
                 if (pos.timeMs <= ts) {
@@ -250,6 +243,27 @@ function buildUnifiedTimeline(data, startMs, endMs) {
         });
         
         timeline.push(event);
+    }
+    
+    // Ensure last snapshot matches closest position to end time
+    Object.entries(data).forEach(([address, info]) => {
+        let closestPos = null;
+        let minDiff = Infinity;
+        
+        info.positions.forEach(pos => {
+            const diff = Math.abs(pos.timeMs - endMs);
+            if (diff < minDiff && pos.timeMs <= endMs) {
+                minDiff = diff;
+                closestPos = pos;
+            }
+        });
+        
+        if (closestPos && timeline.length > 0) {
+            timeline[timeline.length - 1].values[address] = {
+                netSize: closestPos.netSize,
+                realizedPnl: closestPos.realizedPnl
+            };
+        }
     });
     
     return timeline;
@@ -287,33 +301,65 @@ function calculateScales(timeline) {
     };
 }
 
+// Clear error for a specific field
+function clearError(fieldId) {
+    const errorElement = document.getElementById(fieldId + '-error');
+    if (errorElement) {
+        errorElement.textContent = '';
+    }
+}
+
+// Show error for a specific field
+function showError(fieldId, message) {
+    const errorElement = document.getElementById(fieldId + '-error');
+    if (errorElement) {
+        errorElement.textContent = message;
+    }
+}
+
+// Clear all errors
+function clearAllErrors() {
+    ['startTime', 'endTime', 'token', 'duration', 'addresses'].forEach(clearError);
+}
+
 // Start visualization
 async function startVisualization() {
+    clearAllErrors();
+    
     const startTimeInput = document.getElementById('startTime').value;
     const endTimeInput = document.getElementById('endTime').value;
     const token = document.getElementById('token').value.trim().toUpperCase();
     const duration = parseFloat(document.getElementById('duration').value) * 1000;
     const addressesText = document.getElementById('addresses').value.trim();
 
-    if (!startTimeInput || !endTimeInput) {
-        alert('Please enter start and end times');
-        return;
+    // Validation
+    let hasError = false;
+    
+    if (!startTimeInput) {
+        showError('startTime', 'Start time is required');
+        hasError = true;
+    }
+    if (!endTimeInput) {
+        showError('endTime', 'End time is required');
+        hasError = true;
     }
     if (!token) {
-        alert('Please enter a token symbol');
-        return;
+        showError('token', 'Token symbol is required');
+        hasError = true;
     }
     if (!addressesText) {
-        alert('Please enter at least one user address');
-        return;
+        showError('addresses', 'At least one address is required');
+        hasError = true;
     }
+    
+    if (hasError) return;
 
     const startMs = parseDateTime(startTimeInput);
     const endMs = parseDateTime(endTimeInput);
     const addresses = addressesText.split('\n').map(a => a.trim()).filter(a => a);
 
     if (addresses.length === 0) {
-        alert('Please enter at least one valid address');
+        showError('addresses', 'Please enter at least one valid address');
         return;
     }
 
@@ -358,6 +404,9 @@ async function startVisualization() {
         buildLegend('pnlLegend', data);
         initializeChartDatasets(data);
 
+        // Fetch leaderboard data while animation is starting
+        fetchLeaderboard();
+
         setStatus('Running...', 'running');
         const animationStartTime = performance.now();
         animate(animationStartTime);
@@ -367,6 +416,11 @@ async function startVisualization() {
         setStatus(`Error: ${error.message}`, 'error');
         document.getElementById('startBtn').disabled = false;
         document.getElementById('stopBtn').disabled = true;
+        
+        // Show error based on context
+        if (error.message.includes('Failed to fetch data')) {
+            showError('addresses', 'Failed to fetch data for one or more addresses');
+        }
     }
 }
 
@@ -479,6 +533,102 @@ function stopVisualization() {
 function setDefaultTimes() {
     document.getElementById('startTime').value = '2025-12-22T00:00';
     document.getElementById('endTime').value = '2026-01-18T00:00';
+}
+
+// Leaderboard data
+let leaderboardData = [];
+let currentSortMetric = 'pnl';
+
+// Fetch leaderboard from API
+async function fetchLeaderboard() {
+    if (!animationState.data || Object.keys(animationState.data).length === 0) return;
+    
+    try {
+        setStatus('Loading leaderboard...', 'running');
+        
+        const addresses = Object.keys(animationState.data).join(',');
+        const token = document.getElementById('token').value.trim().toUpperCase();
+        const startMs = animationState.startTime;
+        const endMs = animationState.endTime;
+        
+        const params = new URLSearchParams({
+            users: addresses,
+            coin: token,
+            fromMs: startMs.toString(),
+            toMs: endMs.toString()
+        });
+        
+        const response = await fetch(`/v1/leaderboard/combined?${params}`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch leaderboard data');
+        }
+        
+        leaderboardData = await response.json();
+        displayLeaderboard(currentSortMetric);
+        document.getElementById('leaderboardContainer').style.display = 'block';
+        setStatus('Complete', 'idle');
+        
+    } catch (error) {
+        console.error('Leaderboard error:', error);
+        setStatus('Complete (leaderboard unavailable)', 'idle');
+    }
+}
+
+// Format number for display
+function formatNumber(num, decimals = 2) {
+    if (Math.abs(num) >= 1000000) {
+        return (num / 1000000).toFixed(decimals) + 'M';
+    } else if (Math.abs(num) >= 1000) {
+        return (num / 1000).toFixed(decimals) + 'K';
+    }
+    return num.toFixed(decimals);
+}
+
+// Display leaderboard
+function displayLeaderboard(sortBy = 'pnl') {
+    currentSortMetric = sortBy;
+    
+    // Sort data
+    const sorted = [...leaderboardData].sort((a, b) => {
+        const valA = a[sortBy];
+        const valB = b[sortBy];
+        return valB - valA; // Descending order
+    });
+    
+    // Update UI
+    const tbody = document.getElementById('leaderboardBody');
+    tbody.innerHTML = '';
+    
+    sorted.forEach((entry, index) => {
+        const row = document.createElement('tr');
+        
+        const pnlClass = entry.pnl > 0 ? 'positive' : entry.pnl < 0 ? 'negative' : '';
+        const returnClass = entry.returnPct > 0 ? 'positive' : entry.returnPct < 0 ? 'negative' : '';
+        
+        row.innerHTML = `
+            <td class="rank-cell">${index + 1}</td>
+            <td class="address-cell">${shortenAddress(entry.user)}</td>
+            <td class="text-right ${pnlClass}">${formatNumber(entry.pnl)}</td>
+            <td class="text-right">${formatNumber(entry.volume)}</td>
+            <td class="text-right ${returnClass}">${entry.returnPct.toFixed(2)}%</td>
+            <td class="text-right">${entry.tradeCount}</td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+    
+    // Update active button
+    document.querySelectorAll('.sort-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.sort === sortBy) {
+            btn.classList.add('active');
+        }
+    });
+}
+
+// Sort leaderboard
+function sortLeaderboard(metric) {
+    displayLeaderboard(metric);
 }
 
 // Initialize on load
