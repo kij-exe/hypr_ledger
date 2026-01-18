@@ -9,7 +9,7 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - HYPERLIQUID_API_URL=https://api.hyperliquid.xyz
-      # Uncomment to enable builder-only mode:
+      # Optional for builder mode (default to Insilico):
       # - TARGET_BUILDER=0x...
     restart: unless-stopped
     healthcheck:

@@ -1,21 +1,17 @@
 # Hyperliquid Trade Ledger API
 
-A dockerized service providing trade history, position history, and PnL tracking for Hyperliquid.
+A dockerized service providing trade history, position reconstruction, cumulative PnL tracking, and leaderboards for Hyperliquid — with **optional builder-only mode** for Insilico (or any other builder) competitions.
 
-## Quick Start
+## How to Run
 
 ```bash
-# One-command run with Docker Compose
 docker-compose up --build
 ```
 
-Or without Docker:
-```bash
-pip install -r requirements.txt
-python -m src.main
-```
+The API runs at **`http://localhost:8000`**
 
-The API will be available at `http://localhost:8000`.
+- **API docs**: http://localhost:8000/docs
+- **Competition UI**: http://localhost:8000/competition
 
 ## Environment Variables
 
@@ -24,191 +20,103 @@ The API will be available at `http://localhost:8000`.
 | `HOST` | `0.0.0.0` | Server bind address |
 | `PORT` | `8000` | Server port |
 | `HYPERLIQUID_API_URL` | `https://api.hyperliquid.xyz` | Hyperliquid API base URL |
-| `TARGET_BUILDER` | (none) | Builder address for builder-only mode |
+| `TARGET_BUILDER` | `0x2868fc0d9786a740b491577a43502259efa78a39` | Builder address for builder-only mode (defaults to Insilico) |
 
-## API Endpoints
+---
 
-### GET /v1/trades
-Get normalized trade fills for a user.
+## Builder-Only Mode: How It Works
 
-**Parameters:**
-- `user` (required): User address
-- `coin`: Coin filter
-- `fromMs`: Start time in milliseconds
-- `toMs`: End time in milliseconds  
-- `builderOnly`: Filter to builder-attributed trades only (default: false)
+### What It Does
 
-**Response:** Array of trades with fields:
-- `timeMs`: Timestamp in milliseconds
-- `coin`: Coin symbol
-- `side`: "Buy" or "Sell"
-- `px`: Price
-- `sz`: Size
-- `fee`: Fee amount
-- `closedPnl`: Realized PnL from this trade
-- `builder`: Builder address (optional)
-- `tainted`: Whether trade is tainted (builder-only mode)
+When `builderOnly=true` is passed to any endpoint:
+1. **Trades**: Marks fills attributed not to `TARGET_BUILDER` **tainted**
+2. **Positions**: Marks position lifecycles as **tainted** if ANY fill was non-builder
+3. **PnL/Leaderboard**: Excludes tainted results from aggregates and rankings
 
-### GET /v1/positions/history
-Get position history timeline for a user and coin.
+### How Builder Attribution Is Obtained
 
-**Parameters:**
-- `user` (required): User address
-- `coin` (required): Coin to get position history for
-- `fromMs`: Start time in milliseconds
-- `toMs`: End time in milliseconds
-- `builderOnly`: Filter to builder-attributed trades only (default: false)
-
-**Response:** Array of position states with fields:
-- `timeMs`: Timestamp in milliseconds
-- `netSize`: Net position size (positive=long, negative=short)
-- `avgEntryPx`: Average entry price
-- `realizedPnl`: Cumulative realized PnL
-- `tainted`: Whether position is tainted (builder-only mode)
-
-### GET /v1/pnl
-Get PnL metrics for a user.
-
-**Parameters:**
-- `user` (required): User address
-- `coin`: Coin filter
-- `fromMs`: Start time in milliseconds
-- `toMs`: End time in milliseconds
-- `builderOnly`: Filter to builder-attributed trades only (default: false)
-- `maxStartCapital`: Cap for capital normalization
-
-**Response:** PnL result with fields:
-- `realizedPnl`: Absolute USD value of realized PnL
-- `returnPct`: Relative return percentage
-- `feesPaid`: Total fees paid
-- `tradeCount`: Number of trades
-- `volume`: Total notional volume traded
-- `tainted`: Whether result is tainted (builder-only mode)
-
-### GET /v1/leaderboard
-Get leaderboard ranking users by specified metric.
-
-**Parameters:**
-- `users` (required): Comma-separated list of user addresses
-- `coin`: Coin filter
-- `fromMs`: Start time in milliseconds
-- `toMs`: End time in milliseconds
-- `metric`: Ranking metric - `volume`, `pnl`, or `returnPct` (default: pnl)
-- `builderOnly`: Filter to builder-attributed trades only (default: false)
-- `maxStartCapital`: Cap for capital normalization
-
-**Response:** Array of leaderboard entries with fields:
-- `rank`: Ranking position (1 = best)
-- `user`: User address
-- `metricValue`: Value of the ranking metric
-- `tradeCount`: Number of trades
-- `tainted`: Whether entry is tainted (builder-only mode)
-
-### GET /v1/deposits (Bonus Feature)
-Get deposit tracking information for a user.
-
-**Parameters:**
-- `user` (required): User address
-- `fromMs`: Start time in milliseconds
-- `toMs`: End time in milliseconds
-
-**Response:** Deposit tracking result with fields:
-- `totalDeposits`: Total deposited amount in USD
-- `depositCount`: Number of deposit transactions
-- `deposits[]`: Array of individual deposits with `timeMs`, `amount`, `hash`, `txType`
-
-**Purpose:** Enables filtering users who reloaded capital during competition window.
-
-### GET /health
-Health check endpoint.
-
-## Builder-Only Mode
-
-**Status:** Placeholder (flag accepted but not fully implemented)
-
-When `TARGET_BUILDER` is set and `builderOnly=true`:
-- Trades are filtered to those attributed to the target builder
-- `tainted=true` is set when non-builder activity affects the same position lifecycle
-
-**Limitations:**
-- Builder attribution is obtained from the `builderFee` field in fills
-- The Hyperliquid public API only returns the most recent 10,000 fills per user
-- Historical equity is not available via public API (current equity used as fallback)
-
-## Architecture
-
+**Source**: Builder-attributed fills are fetched from Hyperliquid's public CSV files:
 ```
-src/
-├── models/          # Pydantic data models
-├── datasources/     # Data source abstraction + Hyperliquid implementation
-├── services/        # Business logic (trades, positions, pnl, leaderboard)
-├── api/             # FastAPI routes and dependencies
-├── config.py        # Configuration management
-├── app.py           # Application factory
-└── main.py          # Entry point
+https://stats-data.hyperliquid.xyz/Mainnet/builder_fills/{TARGET_BUILDER}/{YYYYMMDD}.csv.lz4
 ```
 
-### Data Source Abstraction
+These CSVs contain all fills executed through a specific builder on a given day.
 
-The `DataSource` abstract class (`src/datasources/base.py`) provides:
-- `get_user_fills()`: Retrieve fills for a user
-- `get_user_equity()`: Get current account equity
-- `get_user_equity_at_time()`: Get historical equity (if available)
-- `get_user_deposits()`: Retrieve deposit/withdrawal ledger updates
+**Matching Algorithm**:
+1. Fetch user fills from Hyperliquid Info API
+2. Download builder CSVs for the date range
+3. Match fills by:
+   - User address (exact)
+   - Coin (exact)
+   - Side (exact)
+   - Price (exact)
+   - Size (exact)
+   - Timestamp (within ±1 second tolerance)
 
-This abstraction allows swapping to Insilico-HL or HyperServe with minimal changes.
+4. Mark matched fills as **builder-attributed**
 
-See [BONUS_FEATURES.md](BONUS_FEATURES.md) for detailed bonus feature documentation.
+**Taint Detection** (Position Lifecycle):
+- A **position lifecycle** starts when `netSize` moves from `0` → non-zero
+- It ends when `netSize` returns to `0` (position closed)
+- If **any fill** in the lifecycle is **not builder-attributed**, the entire lifecycle is marked `tainted=true`
+- Tainted positions are excluded from builder-only leaderboards and visualizations
 
-## Bonus Features Implemented
+This ensures builder-only mode shows **exclusively** builder-executed positions.
 
-### 1. Deposit Tracking ✅
-- **Endpoint:** `GET /v1/deposits`
-- **Purpose:** Track deposits to filter users who reloaded capital during competition
-- Returns total deposits, deposit count, and individual deposit transactions
-- Enables fair competition filtering
+### Limitations of Builder Attribution
 
-### 2. Risk Fields ✅
-- **Fields:** `liqPx` (liquidation price), `marginUsed` on position responses
-- Optional fields included in position history endpoint
-- Note: Currently set to null as margin/liquidation data requires additional API calls
+**1. Inexact Matching**
 
-### 3. Partial Closes & Position Flips ✅
-- Correctly handles partial position closes
-- Properly tracks long → short and short → long transitions
-- Average entry price recalculated on position flips
-- Implemented in `PositionService._reconstruct_position_history()`
+The matching algorithm relies on heuristics rather than cryptographic proof:
+- Matches are based on observable trade parameters (user, coin, side, price, size, timestamp)
+- Timestamp tolerance (±1 second) may cause false positives in high-frequency scenarios
+- No direct builder field exists in Hyperliquid's public API fills; attribution is inferred by matching against builder CSV data
+- Edge cases (e.g., identical concurrent trades) may result in ambiguous attribution
 
-### 4. Multi-Coin Aggregation ✅
-- **Portfolio-level PnL:** Omit `coin` parameter to get all-coins aggregate
-- **Portfolio leaderboard:** Omit `coin` parameter for cross-asset ranking
-- Example: `GET /v1/pnl?user=0x...` returns total PnL across all coins
+**2. Performance Inefficiency**
 
-## Limitations
+Builder attribution requires retrieving and processing the complete builder trade history:
+- **Data volume**: All fills executed by the builder for the requested date range must be downloaded (can exceed thousands of trades per day)
+- **Decompression overhead**: CSV files are LZ4-compressed and must be decompressed before parsing
+- **Filtering step**: The entire builder dataset must be filtered for each user's fills before matching
+- **Matching complexity**: Each user fill requires comparison against the full set of builder fills, resulting in O(n × m) operations where n = user fills and m = builder fills for the date range
 
-1. **Fill limit**: Only the 10,000 most recent fills are available per user via public API
-2. **Historical equity**: Not available via public API; current equity used as fallback for return % calculations
-3. **Builder attribution**: Based on `builderFee` field presence in fills
-4. **Risk fields**: `liqPx` and `marginUsed` are included in the schema but set to null (require additional API implementation)
+This approach is suitable for periodic leaderboard computation but may introduce latency for real-time queries with large date ranges.
 
-## Examples
+---
 
-```bash
-# Get trades for a user
-curl "http://localhost:8000/v1/trades?user=0x0e09b56ef137f417e424f1265425e93bfff77e17"
+## Competition UI
 
-# Get position history for BTC
-curl "http://localhost:8000/v1/positions/history?user=0x0e09b56ef137f417e424f1265425e93bfff77e17&coin=BTC"
+**`GET /competition`** - Interactive frontend for visualizing position changes and PnL
 
-# Get PnL with time range
-curl "http://localhost:8000/v1/pnl?user=0x0e09b56ef137f417e424f1265425e93bfff77e17&fromMs=1704067200000&toMs=1706745600000"
+**Features**:
+- **Live animation**: Replays position changes over time with smooth transitions
+- **Builder-only toggle**: Exclude tainted positions from visualization
+- **Multi-user comparison**: Plot multiple traders on same chart
+- **Leaderboard**: Auto-generated rankings after animation completes
+- **Charts**: Net position size + cumulative PnL over time
 
-# Get leaderboard
-curl "http://localhost:8000/v1/leaderboard?users=0xabc...,0xdef...&metric=pnl"
+**Why use it**:
+- **Demo-ready**: Instantly visualize competition results for judges/stakeholders
+- **Validation**: Visually verify position reconstruction logic is correct
+- **Exploration**: Quickly test different time ranges and coin filters
+- **Builder attribution**: Toggle builder-only mode to see taint detection in action
 
-# Get deposits (bonus feature)
-curl "http://localhost:8000/v1/deposits?user=0x0e09b56ef137f417e424f1265425e93bfff77e17&fromMs=1704067200000"
+---
 
-# Get portfolio-level PnL (multi-coin aggregation)
-curl "http://localhost:8000/v1/pnl?user=0x0e09b56ef137f417e424f1265425e93bfff77e17"
+## API Endpoints 
+
+Full description is in the specification, short summary is given below
+
+**Full API documentation / Swagger UI**: http://localhost:8000/docs (interactive OpenAPI)
+
+### Core Endpoints
+
+```
+GET /v1/trades?user=&coin=&fromMs=&toMs=&builderOnly=false
+GET /v1/positions/history?user=&coin=&fromMs=&toMs=&builderOnly=false
+GET /v1/pnl?user=&coin=&fromMs=&toMs=&builderOnly=false&maxStartCapital=
+GET /v1/leaderboard?users=&coin=&metric=pnl|volume|returnPct&builderOnly=false&maxStartCapital=
+GET /v1/deposits?user=&fromMs=&toMs=  (bonus feature)
+GET /health
 ```
