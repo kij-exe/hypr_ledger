@@ -53,17 +53,47 @@ class PositionService:
         )
         
         # Get builder fills if builder_only mode is enabled
-        builder_fill_indices = set()
-        if builder_only and builder_service and from_ms and to_ms:
-            from src.services.builder_service import BuilderService
+        builder_fill_indices = None
+        if builder_only and builder_service:
+            import logging
+            from datetime import datetime, timezone
+            logger = logging.getLogger(__name__)
+            
+            # Determine time range for builder fill lookup
+            # If times not specified, infer from the fills we have
+            if fills:
+                actual_from_ms = from_ms if from_ms else fills[0].time
+                actual_to_ms = to_ms if to_ms else fills[-1].time
+            elif from_ms:
+                # Use provided from_ms and current time if no fills
+                actual_from_ms = from_ms
+                actual_to_ms = to_ms if to_ms else int(datetime.now(timezone.utc).timestamp() * 1000)
+            else:
+                # Cannot determine time range
+                logger.warning(f"Builder-only mode requested but no time range available")
+                builder_fill_indices = None
+                return self._reconstruct_position_history(fills, coin, builder_fill_indices)
+            
+            logger.info(f"Builder-only mode: fetching builder fills for {user[:10]}... from {actual_from_ms} to {actual_to_ms}")
             builder_fills = await builder_service.get_builder_fills_for_range(
                 user=user,
-                start_ms=from_ms,
-                end_ms=to_ms
+                start_ms=actual_from_ms,
+                end_ms=actual_to_ms
             )
-            builder_fill_indices = builder_service.match_fills(fills, builder_fills)
+            logger.info(f"Found {len(builder_fills)} builder fills from CSV")
+            
+            matched_indices = builder_service.match_fills(fills, builder_fills)
+            logger.info(f"Matched {len(matched_indices)}/{len(fills)} fills to builder")
+            logger.info(f"Matched fill indices: {sorted(matched_indices)}")
+            
+            # Only pass indices if we actually found builder fills to compare against
+            if len(builder_fills) > 0:
+                builder_fill_indices = matched_indices
+                logger.info(f"Setting builder_fill_indices with {len(builder_fill_indices)} matched fills")
+            else:
+                logger.warning(f"No builder fills found in CSV - cannot determine taint status")
         
-        return self._reconstruct_position_history(fills, coin, builder_fill_indices if builder_only else None)
+        return self._reconstruct_position_history(fills, coin, builder_fill_indices)
 
     def _reconstruct_position_history(
         self, 
@@ -143,7 +173,17 @@ class PositionService:
             tainted = None
             if builder_fill_indices is not None and lifecycle_start_idx is not None:
                 # Check if any fill in current lifecycle is not builder-attributed
-                tainted = any(idx not in builder_fill_indices for idx in lifecycle_fills)
+                non_builder_fills = [idx for idx in lifecycle_fills if idx not in builder_fill_indices]
+                builder_fills_in_lifecycle = [idx for idx in lifecycle_fills if idx in builder_fill_indices]
+                tainted = len(non_builder_fills) > 0
+                
+                # Log taint status for debugging
+                if fill_idx < 5 or abs(net_size) < 1e-10:  # Log first few fills and lifecycle closes
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Fill {fill_idx}: Lifecycle fills={lifecycle_fills}, "
+                               f"Builder={builder_fills_in_lifecycle}, Non-builder={non_builder_fills}, "
+                               f"Tainted={tainted}, NetSize={net_size:.4f}")
 
             # Record state after this fill
             history.append(PositionState(
@@ -234,15 +274,27 @@ class PositionService:
             coin_state['avg_entry_px'] = avg_entry_px
             
             # Compute taint status
-            # A multi-coin position is tainted if ANY coin's active lifecycle contains a non-builder fill
+            # A multi-coin position is tainted if ANY coin's active (non-zero) lifecycle contains a non-builder fill
             tainted = None
             if builder_fill_indices is not None:
                 tainted = False
-                for coin_lifecycle in coin_lifecycles.values():
-                    if coin_lifecycle:  # Only check active lifecycles
-                        if any(idx not in builder_fill_indices for idx in coin_lifecycle):
+                total_non_builder = 0
+                for coin_name_check, coin_lifecycle in coin_lifecycles.items():
+                    # Only check lifecycles for coins that currently have open positions
+                    if coin_lifecycle and abs(coin_positions[coin_name_check]['net_size']) > 1e-10:
+                        non_builder_in_lifecycle = [idx for idx in coin_lifecycle if idx not in builder_fill_indices]
+                        if non_builder_in_lifecycle:
                             tainted = True
-                            break
+                            total_non_builder += len(non_builder_in_lifecycle)
+                
+                # Log for debugging
+                if fill_idx == 0 or fill_idx % 50 == 0:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    active_lifecycles = sum(1 for cn in coin_lifecycles.keys() 
+                                          if abs(coin_positions[cn]['net_size']) > 1e-10)
+                    logger.debug(f"Multi-coin fill {fill_idx}: {active_lifecycles} active lifecycles, "
+                               f"{total_non_builder} non-builder fills, tainted={tainted}")
             
             # Create position state with combined PnL and netSize=0
             history.append(PositionState(

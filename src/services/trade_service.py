@@ -1,9 +1,12 @@
 """Trade service for normalizing and filtering fills."""
 
 from typing import Optional
+import logging
 
 from src.datasources import DataSource
 from src.models import Fill, Trade
+
+logger = logging.getLogger(__name__)
 
 
 class TradeService:
@@ -28,7 +31,7 @@ class TradeService:
             coin: Optional coin filter
             from_ms: Start time in milliseconds
             to_ms: End time in milliseconds
-            builder_only: If True, filter to builder-attributed trades only
+            builder_only: If True, mark trades as builder-attributed and filter
             
         Returns:
             List of normalized Trade objects
@@ -40,18 +43,62 @@ class TradeService:
             coin=coin,
         )
         
-        trades = [self._fill_to_trade(f) for f in fills]
+        # Check builder attribution if requested
+        builder_matched_indices = set()
+        target_builder = None
+        if builder_only and fills:
+            from datetime import datetime, timezone
+            from src.config import Config
+            from src.services.builder_service import BuilderService
+            
+            config = Config.from_env()
+            target_builder = config.target_builder
+            builder_service = BuilderService(target_builder)
+            
+            # Determine time range
+            actual_from_ms = from_ms if from_ms else fills[0].time
+            actual_to_ms = to_ms if to_ms else fills[-1].time
+            
+            logger.info(f"Fetching builder fills for trades from {actual_from_ms} to {actual_to_ms}")
+            builder_fills = await builder_service.get_builder_fills_for_range(
+                user=user,
+                start_ms=actual_from_ms,
+                end_ms=actual_to_ms
+            )
+            
+            if builder_fills:
+                builder_matched_indices = builder_service.match_fills(fills, builder_fills)
+                logger.info(f"Matched {len(builder_matched_indices)}/{len(fills)} trades to builder")
         
-        # builder_only filtering is a placeholder for now
-        # When implemented, would filter by TARGET_BUILDER
+        # Convert fills to trades, marking builder attribution
+        trades = []
+        for idx, fill in enumerate(fills):
+            # Trade is NOT tainted if it matched the builder
+            # Trade IS tainted if it didn't match (non-builder)
+            is_builder_attributed = idx in builder_matched_indices if builder_only else None
+            tainted = not is_builder_attributed if is_builder_attributed is not None else False
+            
+            trades.append(Trade(
+                timeMs=fill.time,
+                coin=fill.coin,
+                side="Buy" if fill.is_buy else "Sell",
+                px=fill.price,
+                sz=fill.size,
+                fee=fill.fee_amount,
+                closedPnl=fill.realized_pnl,
+                builder=target_builder if is_builder_attributed else None,
+                tainted=tainted,
+            ))
+        
+        # Filter to only builder-attributed trades if requested
         if builder_only:
-            # TODO: Implement builder filtering when builder attribution is available
-            pass
+            trades = [t for t in trades if not t.tainted]
+            logger.info(f"Filtered to {len(trades)} builder-attributed trades")
         
         return trades
 
     def _fill_to_trade(self, fill: Fill) -> Trade:
-        """Convert a Fill to a normalized Trade."""
+        """Convert a Fill to a normalized Trade (deprecated - use get_trades)."""
         return Trade(
             timeMs=fill.time,
             coin=fill.coin,
@@ -60,7 +107,7 @@ class TradeService:
             sz=fill.size,
             fee=fill.fee_amount,
             closedPnl=fill.realized_pnl,
-            builder=None,  # TODO: Extract builder from fill when available
+            builder=None,
             tainted=False,
         )
 
