@@ -255,6 +255,38 @@ function buildUnifiedTimeline(data, startMs, endMs) {
     return timeline;
 }
 
+// Calculate predetermined scales for Y axes
+function calculateScales(timeline) {
+    let minPosition = Infinity;
+    let maxPosition = -Infinity;
+    let minPnl = Infinity;
+    let maxPnl = -Infinity;
+    
+    timeline.forEach(event => {
+        Object.values(event.values).forEach(values => {
+            minPosition = Math.min(minPosition, values.netSize);
+            maxPosition = Math.max(maxPosition, values.netSize);
+            minPnl = Math.min(minPnl, values.realizedPnl);
+            maxPnl = Math.max(maxPnl, values.realizedPnl);
+        });
+    });
+    
+    // Add 10% padding
+    const positionPadding = Math.abs(maxPosition - minPosition) * 0.1;
+    const pnlPadding = Math.abs(maxPnl - minPnl) * 0.1;
+    
+    return {
+        position: {
+            min: minPosition - positionPadding,
+            max: maxPosition + positionPadding
+        },
+        pnl: {
+            min: minPnl - pnlPadding,
+            max: maxPnl + pnlPadding
+        }
+    };
+}
+
 // Start visualization
 async function startVisualization() {
     const startTimeInput = document.getElementById('startTime').value;
@@ -305,7 +337,8 @@ async function startVisualization() {
         }
 
         const timeline = buildUnifiedTimeline(data, startMs, endMs);
-        
+        const scales = calculateScales(timeline);
+
         if (timeline.length < 2) {
             throw new Error('No position data found in the specified time range');
         }
@@ -317,6 +350,7 @@ async function startVisualization() {
             duration: duration,
             data: data,
             timeline: timeline,
+            scales: scales,
             currentTimelineIndex: 0
         };
 
@@ -336,22 +370,22 @@ async function startVisualization() {
     }
 }
 
-// Initialize chart datasets with step line for candle-like effect
+// Initialize chart datasets with smooth curves
 function initializeChartDatasets(data) {
     positionChart.data.datasets = Object.entries(data).map(([address, info]) => ({
         label: shortenAddress(address),
         data: [],
         borderColor: info.color,
         backgroundColor: info.color + '15',
-        borderWidth: 2,
+        borderWidth: 2.5,
         pointRadius: 0,
         pointHoverRadius: 6,
         pointHoverBackgroundColor: info.color,
         pointHoverBorderColor: '#fff',
         pointHoverBorderWidth: 2,
-        stepped: 'before',  // Step line for candle-like appearance
         fill: true,
-        tension: 0
+        tension: 0.4,  // Smooth cubic curves
+        cubicInterpolationMode: 'monotone'
     }));
 
     pnlChart.data.datasets = Object.entries(data).map(([address, info]) => ({
@@ -359,15 +393,15 @@ function initializeChartDatasets(data) {
         data: [],
         borderColor: info.color,
         backgroundColor: info.color + '15',
-        borderWidth: 2,
+        borderWidth: 2.5,
         pointRadius: 0,
         pointHoverRadius: 6,
         pointHoverBackgroundColor: info.color,
         pointHoverBorderColor: '#fff',
         pointHoverBorderWidth: 2,
-        stepped: 'before',  // Step line for candle-like appearance
         fill: true,
-        tension: 0
+        tension: 0.4,  // Smooth cubic curves
+        cubicInterpolationMode: 'monotone'
     }));
 
     positionChart.update('none');
@@ -409,8 +443,13 @@ function animate(animationStartTime) {
 
     positionChart.options.scales.x.min = animationState.startTime;
     positionChart.options.scales.x.max = animationState.endTime;
+    positionChart.options.scales.y.min = animationState.scales.position.min;
+    positionChart.options.scales.y.max = animationState.scales.position.max;
+    
     pnlChart.options.scales.x.min = animationState.startTime;
     pnlChart.options.scales.x.max = animationState.endTime;
+    pnlChart.options.scales.y.min = animationState.scales.pnl.min;
+    pnlChart.options.scales.y.max = animationState.scales.pnl.max;
 
     positionChart.update('none');
     pnlChart.update('none');

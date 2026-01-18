@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Optional
 
 from src.datasources import DataSource
-from src.models import LeaderboardEntry
+from src.models import LeaderboardEntry, CombinedLeaderboardEntry
 from .pnl_service import calculate_pnl_for_users
 
 
@@ -96,3 +96,54 @@ class LeaderboardService:
         elif metric == LeaderboardMetric.RETURN_PCT:
             return result.returnPct
         return None
+
+    async def get_combined_leaderboard(
+        self,
+        users: list[str],
+        coin: Optional[str] = None,
+        from_ms: Optional[int] = None,
+        to_ms: Optional[int] = None,
+        builder_only: bool = False,
+        max_start_capital: Optional[float] = None,
+    ) -> list[CombinedLeaderboardEntry]:
+        """
+        Get leaderboard with all metrics for each user.
+        
+        Useful for competition displays where users can sort by different metrics.
+        
+        Args:
+            users: List of user addresses to include
+            coin: Optional coin filter
+            from_ms: Start time in milliseconds
+            to_ms: End time in milliseconds
+            builder_only: If True, only include builder-attributed trades
+            max_start_capital: Cap for capital normalization
+            
+        Returns:
+            List of CombinedLeaderboardEntry with all metrics
+        """
+        # Calculate PnL for all users
+        pnl_results = await calculate_pnl_for_users(
+            datasource=self.datasource,
+            users=users,
+            coin=coin,
+            from_ms=from_ms,
+            to_ms=to_ms,
+            builder_only=builder_only,
+            max_start_capital=max_start_capital,
+        )
+        
+        # Create combined entries
+        combined = [
+            CombinedLeaderboardEntry(
+                user=result.user,
+                volume=result.volume,
+                pnl=result.realizedPnl,
+                returnPct=result.returnPct if result.returnPct is not None else 0.0,
+                tradeCount=result.tradeCount,
+                tainted=result.tainted,
+            )
+            for result in pnl_results
+        ]
+        
+        return combined

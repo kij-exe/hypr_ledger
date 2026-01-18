@@ -13,7 +13,7 @@ from .position import (
     SimplePositionResponse,
 )
 from .pnl import PnLResult
-from .leaderboard import LeaderboardEntry
+from .leaderboard import LeaderboardEntry, CombinedLeaderboardEntry
 from .deposit import Deposit, DepositResult
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "SimplePositionResponse",
     "PnLResult",
     "LeaderboardEntry",
+    "CombinedLeaderboardEntry",
     "Deposit",
     "DepositResult",
 ]

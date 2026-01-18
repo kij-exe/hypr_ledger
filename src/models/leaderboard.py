@@ -15,3 +15,17 @@ class LeaderboardEntry(BaseModel):
     metricValue: float = Field(description="Value of the ranking metric")
     tradeCount: int
     tainted: Optional[bool] = Field(default=None, description="Tainted flag for builder-only mode")
+
+
+class CombinedLeaderboardEntry(BaseModel):
+    """
+    A leaderboard entry with all metrics for competition display.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+    
+    user: str
+    volume: float = Field(description="Total trading volume")
+    pnl: float = Field(description="Realized PnL")
+    returnPct: float = Field(description="Return percentage")
+    tradeCount: int
+    tainted: Optional[bool] = Field(default=None, description="Tainted flag for builder-only mode")

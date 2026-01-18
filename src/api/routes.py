@@ -9,7 +9,8 @@ from src.models import (
     Trade, 
     PositionState, 
     PnLResult, 
-    LeaderboardEntry, 
+    LeaderboardEntry,
+    CombinedLeaderboardEntry,
     DepositResult,
     CurrentPositionResponse,
     SimplePositionResponse,
@@ -219,6 +220,57 @@ async def get_leaderboard(
         from_ms=fromMs,
         to_ms=toMs,
         metric=leaderboard_metric,
+        builder_only=builderOnly,
+        max_start_capital=maxStartCapital,
+    )
+
+
+@router.get("/leaderboard/combined", response_model=list[CombinedLeaderboardEntry])
+async def get_combined_leaderboard(
+    users: str = Query(
+        ..., 
+        description="Comma-separated list of user addresses",
+        example="0x0e09b56ef137f417e424f1265425e93bfff77e17,0x186b7610ff3f2e3fd7985b95f525ee0e37a79a74"
+    ),
+    coin: Optional[str] = Query(
+        None, 
+        description="Coin filter",
+        example="BTC"
+    ),
+    fromMs: Optional[int] = Query(
+        None, 
+        description="Start time in milliseconds"
+    ),
+    toMs: Optional[int] = Query(
+        None, 
+        description="End time in milliseconds"
+    ),
+    builderOnly: bool = Query(
+        False, 
+        description="Filter to builder-attributed trades only"
+    ),
+    maxStartCapital: Optional[float] = Query(
+        None, 
+        description="Cap for capital normalization",
+        example=1000.0
+    ),
+    datasource: DataSource = Depends(get_datasource),
+) -> list[CombinedLeaderboardEntry]:
+    """
+    Get combined leaderboard with all metrics (volume, PnL, returnPct).
+    
+    Useful for competition displays where sorting by different metrics is needed.
+    Returns all three metrics for each user without pre-ranking.
+    """
+    # Parse users from comma-separated string
+    user_list = [u.strip() for u in users.split(",") if u.strip()]
+    
+    service = LeaderboardService(datasource)
+    return await service.get_combined_leaderboard(
+        users=user_list,
+        coin=coin,
+        from_ms=fromMs,
+        to_ms=toMs,
         builder_only=builderOnly,
         max_start_capital=maxStartCapital,
     )
