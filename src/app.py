@@ -1,9 +1,12 @@
 """FastAPI application factory."""
 
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 
 from src.config import Config
 from src.datasources import HyperliquidDataSource
@@ -55,6 +58,18 @@ def create_app(config: Config | None = None) -> FastAPI:
     
     # Include API routes
     app.include_router(router)
+    
+    # Mount static files
+    static_dir = Path(__file__).parent / "api" / "static"
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    
+    # Competition visualization page (at root, not under /v1)
+    competition_html = static_dir / "competition" / "index.html"
+    
+    @app.get("/competition", response_class=HTMLResponse)
+    async def competition_page():
+        """Serve the competition analysis webpage."""
+        return HTMLResponse(content=competition_html.read_text())
     
     # Health check endpoint
     @app.get("/health")

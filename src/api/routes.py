@@ -1,10 +1,8 @@
 """API routes for the trade ledger service."""
 
 from typing import Optional
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse
 
 from src.datasources import DataSource
 from src.models import (
@@ -295,16 +293,3 @@ async def get_deposits(
     )
 
 
-# Competition visualization page
-COMPETITION_HTML = Path(__file__).parent / "templates" / "competition.html"
-
-
-@router.get("/competition", response_class=HTMLResponse)
-async def competition_page():
-    """
-    Serve the competition analysis webpage.
-    
-    Allows users to visualize position changes and PnL over time for multiple addresses.
-    """
-    html_content = COMPETITION_HTML.read_text()
-    return HTMLResponse(content=html_content)

@@ -78,6 +78,17 @@ class HyperliquidDataSource(DataSource):
                 raise
                 
         except httpx.HTTPStatusError as e:
+            # Handle rate limiting (429 Too Many Requests)
+            if e.response.status_code == 429 and retry_count < MAX_RETRIES:
+                retry_delay = 0.5
+                logger.warning(
+                    f"Rate limited (429) on {endpoint} (attempt {retry_count + 1}/{MAX_RETRIES}). "
+                    f"Retrying in {retry_delay}s..."
+                )
+                print(f"⚠️  Rate limited. Retrying in {retry_delay}s ({retry_count + 1}/{MAX_RETRIES})...")
+                await asyncio.sleep(retry_delay)
+                return await self._make_request(endpoint, payload, retry_count + 1)
+            
             logger.error(f"HTTP error {e.response.status_code} for {endpoint}: {e}")
             raise
             

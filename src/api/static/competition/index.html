@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Competition Analysis - Hyperliquid</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <link rel="stylesheet" href="/static/competition/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Competition Analysis</h1>
+            <p class="subtitle">Visualize position changes and cumulative PnL over time</p>
+        </header>
+
+        <div class="controls glass-card">
+            <div class="controls-row">
+                <div class="control-group">
+                    <label>Start Time</label>
+                    <input type="datetime-local" id="startTime" step="1">
+                </div>
+                <div class="control-group">
+                    <label>End Time</label>
+                    <input type="datetime-local" id="endTime" step="1">
+                </div>
+                <div class="control-group">
+                    <label>Token</label>
+                    <input type="text" id="token" placeholder="e.g. BTC, ETH, SOL">
+                </div>
+                <div class="control-group">
+                    <label>Duration (seconds)</label>
+                    <input type="number" id="duration" value="10" min="1" max="60">
+                </div>
+            </div>
+            <div class="control-group">
+                <label>User Addresses (one per line)</label>
+                <textarea id="addresses">0x0e09b56ef137f417e424f1265425e93bfff77e17
+0x186b7610ff3f2e3fd7985b95f525ee0e37a79a74</textarea>
+            </div>
+            <div class="button-row">
+                <button id="startBtn" class="primary" onclick="startVisualization()">Start</button>
+                <button id="stopBtn" class="secondary" onclick="stopVisualization()" disabled>Stop</button>
+            </div>
+        </div>
+
+        <div class="status-bar glass-card">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-text" id="statusText">Ready</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="time-display" id="currentTime">--</div>
+        </div>
+
+        <div class="charts-container">
+            <div class="chart-card glass-card">
+                <h3>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3v18h18"/>
+                        <path d="M18 17V9"/>
+                        <path d="M13 17V5"/>
+                        <path d="M8 17v-3"/>
+                    </svg>
+                    Net Position Size
+                </h3>
+                <div class="chart-wrapper">
+                    <canvas id="positionChart"></canvas>
+                </div>
+                <div class="legend-custom" id="positionLegend"></div>
+            </div>
+            <div class="chart-card glass-card">
+                <h3>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    </svg>
+                    Cumulative Realized PnL
+                </h3>
+                <div class="chart-wrapper">
+                    <canvas id="pnlChart"></canvas>
+                </div>
+                <div class="legend-custom" id="pnlLegend"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/competition/app.js"></script>
+</body>
+</html>
